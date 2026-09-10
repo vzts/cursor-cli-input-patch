@@ -176,11 +176,9 @@ curl https://cursor.com/install -fsS | bash
 
 ```mermaid
 flowchart LR
-  A[agent launch] --> B{zsh hook?}
-  B -->|yes| C[apply_patch.py --ensure]
-  B -->|no| D[manual run]
-  C --> E[find 4794.index.js]
-  D --> E
+  A[agent launch] --> B[bin wrapper / zsh / LaunchAgent]
+  B --> C[apply_patch.py --ensure]
+  C --> E[find text-input bundle]
   E --> F[replace pinned snippets]
   F --> G{node --check}
   G -->|ok| H[write + backup]
