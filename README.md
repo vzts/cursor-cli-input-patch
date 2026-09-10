@@ -80,7 +80,7 @@ cd cursor-cli-input-patch
 
 python3 tests/test_behavior.py   # no Cursor install needed
 python3 apply_patch.py           # latest CLI + IDE worker
-python3 apply_patch.py --install # optional: zsh hook (see below)
+python3 apply_patch.py --install # optional: zsh hook + bin wrappers + LaunchAgent
 ```
 
 Restart **`agent`** (or **`cursor-agent`** if you still use that alias) after patching.
@@ -94,7 +94,7 @@ Restart **`agent`** (or **`cursor-agent`** if you still use that alias) after pa
 - **Node.js** — `node --check` before writing
 - **macOS** — install paths (especially the IDE worker copy) match Cursor’s layout today
 - **Cursor CLI** — already installed: `curl https://cursor.com/install -fsS | bash`
-- **`--install`** — **zsh only** (writes `~/.zshrc`). Bash/fish: run `python3 apply_patch.py` manually or wrap `agent` yourself.
+- **`--install`** — writes `~/.zshrc` hook, durable `~/.local/bin` wrappers, and (macOS) a LaunchAgent that re-runs `--ensure` after CLI updates. Bash/fish: wrappers + LaunchAgent still work; zsh hook is optional.
 
 </details>
 
@@ -137,8 +137,8 @@ The patcher **never** moves the terminal cursor with escape sequences.
 
 ```bash
 python3 apply_patch.py              # patch CLI + worker
-python3 apply_patch.py --install    # zsh hook → auto-patch before `agent`
-python3 apply_patch.py --ensure     # quiet if done; warn and exit 0 on mismatch
+python3 apply_patch.py --install    # zsh hook + ~/.local/bin wrappers + LaunchAgent
+python3 apply_patch.py --ensure     # quiet if done; repair wrappers; warn and exit 0 on mismatch
 python3 apply_patch.py --restore    # rollback from .orig.bak
 python3 apply_patch.py --list-backups
 python3 apply_patch.py --dry-run -v # preview / verbose
@@ -150,7 +150,9 @@ python3 apply_patch.py --no-worker  # CLI only
 
 <br>
 
-Cursor updates replace the version folder. Re-run `python3 apply_patch.py`, or launch `agent` if `--install` is set.
+Cursor updates replace the version folder and rewrite `~/.local/bin/agent` as a symlink.
+With **`--install`**, a LaunchAgent watches those paths and re-runs `--ensure` (patch + restore wrappers).
+Launching `agent` / `cursor-agent` also runs `--ensure` via the bin wrappers.
 
 Backups — one pristine original per version, never overwritten:
 

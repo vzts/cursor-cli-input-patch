@@ -130,8 +130,8 @@ python3 apply_patch.py --install   # 任意: zsh フック
 
 ```bash
 python3 apply_patch.py              # CLI + worker
-python3 apply_patch.py --install    # zsh フック
-python3 apply_patch.py --ensure     # 済みなら静かに; 不一致は警告後 exit 0
+python3 apply_patch.py --install    # zsh フック + ~/.local/bin ラッパ + LaunchAgent
+python3 apply_patch.py --ensure     # 済みなら静かに; ラッパ修復; 不一致は警告後 exit 0
 python3 apply_patch.py --restore
 python3 apply_patch.py --list-backups
 python3 apply_patch.py --dry-run -v
@@ -143,7 +143,7 @@ python3 apply_patch.py --no-worker
 
 <br>
 
-更新後は `python3 apply_patch.py` を再実行。バックアップ: `~/.local/share/cursor-cli-input-patch/backups/`（旧 `cursor-agent-cjk-input-patch` は自動移行）。
+更新でバージョンフォルダが差し替わり `~/.local/bin/agent` が symlink に戻ります。**`--install`** で LaunchAgent が `--ensure`（パッチ + ラッパ修復）を再実行。`agent` 起動時も bin ラッパが `--ensure` を呼びます。バックアップ: `~/.local/share/cursor-cli-input-patch/backups/`（旧パスは自動移行）。
 
 不一致時 **fail closed**。**`--ensure`** は警告後 `agent` 起動可。最終手段: `curl https://cursor.com/install -fsS | bash`
 

@@ -90,7 +90,7 @@ python3 apply_patch.py --install   # 선택: zsh 훅 (아래 참고)
 
 - **Python 3**, **Node.js**, **macOS** (IDE worker 경로 기준)
 - **Cursor CLI** 설치: `curl https://cursor.com/install -fsS | bash`
-- **`--install`** — **zsh 전용** (`~/.zshrc`). bash/fish는 수동 실행 또는 직접 래핑
+- **`--install`** — `~/.zshrc` 훅, `~/.local/bin` 래퍼, (macOS) CLI 업데이트 후 `--ensure`를 다시 도는 LaunchAgent. bash/fish도 래퍼·LaunchAgent는 동작; zsh 훅은 선택.
 
 </details>
 
@@ -133,8 +133,8 @@ python3 apply_patch.py --install   # 선택: zsh 훅 (아래 참고)
 
 ```bash
 python3 apply_patch.py              # CLI + worker 패치
-python3 apply_patch.py --install    # zsh 훅 → `agent` 전 자동 패치
-python3 apply_patch.py --ensure     # 완료 시 조용히; 불일치 시 경고 후 exit 0
+python3 apply_patch.py --install    # zsh 훅 + ~/.local/bin 래퍼 + LaunchAgent
+python3 apply_patch.py --ensure     # 완료 시 조용히; 래퍼 복구; 불일치 시 경고 후 exit 0
 python3 apply_patch.py --restore    # .orig.bak 복원
 python3 apply_patch.py --list-backups
 python3 apply_patch.py --dry-run -v
@@ -146,7 +146,9 @@ python3 apply_patch.py --no-worker  # CLI만
 
 <br>
 
-업데이트 시 버전 폴더가 교체됩니다. `python3 apply_patch.py` 재실행, 또는 `--install` 시 `agent`만 실행.
+업데이트 시 버전 폴더가 교체되고 `~/.local/bin/agent`가 symlink로 덮입니다.
+**`--install`** 하면 LaunchAgent가 이를 감시해 `--ensure`(패치 + 래퍼 복구)를 다시 돌립니다.
+`agent` / `cursor-agent` 실행 시 bin 래퍼도 `--ensure`를 호출합니다.
 
 백업 — 버전당 원본 하나, 덮어쓰지 않음:
 

@@ -10,6 +10,7 @@ Does not redistribute Cursor binaries. See README.md.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -195,6 +196,10 @@ HOOK_BEGIN = "# cursor-cli-input-patch begin"
 HOOK_END = "# cursor-cli-input-patch end"
 LEGACY_HOOK_BEGIN = "# cursor-agent-cjk-input-patch begin"
 LEGACY_HOOK_END = "# cursor-agent-cjk-input-patch end"
+WRAPPER_MARKER = "# cursor-cli-input-patch wrapper"
+LAUNCH_AGENT_LABEL = "com.cursor-cli-input-patch.ensure"
+BIN_DIR = Path.home() / ".local" / "bin"
+LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
 
 
 def migrate_backup_dir() -> None:
@@ -223,7 +228,11 @@ def latest_version(root: Path) -> Path | None:
     if not root.exists():
         return None
     dirs = sorted(
-        [p for p in root.iterdir() if p.is_dir()],
+        [
+            p
+            for p in root.iterdir()
+            if p.is_dir() and not p.name.startswith(".")
+        ],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -516,19 +525,169 @@ def resolve_roots(version_dir: str | None, worker: bool) -> list[Path]:
     return roots
 
 
+def patch_script_path() -> Path:
+    return Path(__file__).resolve()
+
+
 def shell_hook(script: Path) -> str:
+    # zsh still helps interactive shells; bin wrappers cover absolute-path launches
+    # (Orca, scripts) and LaunchAgent recovers after CLI updates overwrite ~/.local/bin.
     return (
         f"{HOOK_BEGIN}\n"
+        f"# Prefer durable wrappers under ~/.local/bin (repaired by --ensure / LaunchAgent).\n"
         f"agent() {{ python3 \"{script}\" --ensure; command agent \"$@\"; }}\n"
-        f"# cursor-agent is a legacy alias; hook it too if your shell still uses it.\n"
         f"cursor-agent() {{ python3 \"{script}\" --ensure; command cursor-agent \"$@\"; }}\n"
         f"{HOOK_END}\n"
     )
 
 
+def bin_wrapper_body(script: Path) -> str:
+    versions = DEFAULT_VERSIONS
+    python = sys.executable
+    return (
+        "#!/bin/sh\n"
+        f"{WRAPPER_MARKER}\n"
+        "# Re-apply Unicode input patches after Cursor CLI updates, then exec real agent.\n"
+        f'"{python}" "{script}" --ensure >/dev/null 2>&1 || true\n'
+        f'VERSIONS="{versions}"\n'
+        'if [ ! -d "$VERSIONS" ]; then\n'
+        '  echo "cursor-cli-input-patch: no CLI versions under $VERSIONS" >&2\n'
+        "  exit 127\n"
+        "fi\n"
+        # Skip Cursor's in-progress .tmp-* extract dirs (same rule as latest_version()).
+        'LATEST=$(ls -1t "$VERSIONS" 2>/dev/null | awk \'substr($0,1,1)!="." {print; exit}\')\n'
+        'if [ -z "$LATEST" ] || [ ! -x "$VERSIONS/$LATEST/cursor-agent" ]; then\n'
+        '  echo "cursor-cli-input-patch: no runnable cursor-agent under $VERSIONS" >&2\n'
+        "  exit 127\n"
+        "fi\n"
+        'exec "$VERSIONS/$LATEST/cursor-agent" "$@"\n'
+    )
+
+
+def is_our_bin_wrapper(path: Path) -> bool:
+    if not path.is_file() or path.is_symlink():
+        return False
+    try:
+        return WRAPPER_MARKER in path.read_text(errors="ignore")
+    except OSError:
+        return False
+
+
+def install_bin_wrappers(*, verbose: bool = False) -> list[Path]:
+    """Replace ~/.local/bin/{agent,cursor-agent} with durable ensure+exec wrappers.
+
+    Cursor's install script rewrites these as symlinks into versions/; --ensure and
+    the LaunchAgent put the wrappers back.
+    """
+    script = patch_script_path()
+    body = bin_wrapper_body(script)
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for name in ("agent", "cursor-agent"):
+        dest = BIN_DIR / name
+        if is_our_bin_wrapper(dest) and dest.read_text() == body:
+            continue
+        # Remove symlink or stale file so we own the path.
+        if dest.exists() or dest.is_symlink():
+            dest.unlink()
+        dest.write_text(body)
+        dest.chmod(0o755)
+        written.append(dest)
+        if verbose:
+            print(f"installed bin wrapper: {dest}")
+    return written
+
+
+def launch_agent_plist(script: Path) -> str:
+    versions = str(DEFAULT_VERSIONS)
+    bin_agent = str(BIN_DIR / "agent")
+    log_dir = BACKUP_DIR.parent / "logs"
+    python = sys.executable
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{LAUNCH_AGENT_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{python}</string>
+    <string>{script}</string>
+    <string>--ensure</string>
+  </array>
+  <key>WatchPaths</key>
+  <array>
+    <string>{versions}</string>
+    <string>{bin_agent}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>{log_dir}/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>{log_dir}/launchd.err.log</string>
+</dict>
+</plist>
+"""
+
+
+def install_launch_agent(*, verbose: bool = False) -> Path | None:
+    """Watch CLI version installs and ~/.local/bin/agent; re-run --ensure."""
+    if sys.platform != "darwin":
+        return None
+    script = patch_script_path()
+    (BACKUP_DIR.parent / "logs").mkdir(parents=True, exist_ok=True)
+    LAUNCH_AGENTS_DIR.mkdir(parents=True, exist_ok=True)
+    plist_path = LAUNCH_AGENTS_DIR / f"{LAUNCH_AGENT_LABEL}.plist"
+    body = launch_agent_plist(script)
+    domain = f"gui/{os.getuid()}"
+    if plist_path.exists() and plist_path.read_text() == body:
+        # Already installed; ensure it is loaded.
+        check = subprocess.run(
+            ["launchctl", "print", f"{domain}/{LAUNCH_AGENT_LABEL}"],
+            capture_output=True,
+            text=True,
+        )
+        if check.returncode == 0:
+            if verbose:
+                print(f"LaunchAgent {LAUNCH_AGENT_LABEL} already loaded")
+            return plist_path
+    else:
+        if plist_path.exists():
+            subprocess.run(
+                ["launchctl", "bootout", domain, str(plist_path)],
+                capture_output=True,
+                text=True,
+            )
+        plist_path.write_text(body)
+    load = subprocess.run(
+        ["launchctl", "bootstrap", domain, str(plist_path)],
+        capture_output=True,
+        text=True,
+    )
+    if load.returncode != 0 and "already bootstrapped" not in (load.stderr + load.stdout):
+        subprocess.run(
+            ["launchctl", "load", "-w", str(plist_path)],
+            capture_output=True,
+            text=True,
+        )
+    print(f"installed LaunchAgent {LAUNCH_AGENT_LABEL}")
+    return plist_path
+
+
+def ensure_persistence(*, dry_run: bool = False, verbose: bool = False) -> None:
+    """After CLI updates overwrite ~/.local/bin symlinks, put ensure wrappers back."""
+    if dry_run:
+        return
+    written = install_bin_wrappers(verbose=verbose)
+    if written and not verbose:
+        for path in written:
+            print(f"repaired bin wrapper: {path.name}")
+
+
 def install_shell_hook() -> Path:
     rc = Path.home() / ".zshrc"
-    script = Path(__file__).resolve()
+    script = patch_script_path()
     block = shell_hook(script)
     text = rc.read_text() if rc.exists() else ""
     for begin, end in (
@@ -546,7 +705,11 @@ def install_shell_hook() -> Path:
     text = text.rstrip() + "\n\n" + block
     rc.write_text(text)
     print(f"installed shell hook in {rc}")
-    print("open a new terminal (or `source ~/.zshrc`) so `agent` auto-patches on launch")
+    install_bin_wrappers(verbose=True)
+    agent = install_launch_agent(verbose=True)
+    if agent:
+        print("CLI updates that rewrite ~/.local/bin/agent will be re-wrapped automatically")
+    print("open a new terminal (or `source ~/.zshrc`) so interactive `agent` picks up the hook")
     return rc
 
 
@@ -573,9 +736,13 @@ def main() -> None:
     parser.add_argument(
         "--ensure",
         action="store_true",
-        help="Quiet no-op if already patched; if a CLI update cannot be patched, warn and exit 0",
+        help="Quiet no-op if already patched; repair bin wrappers; warn and exit 0 on mismatch",
     )
-    parser.add_argument("--install", action="store_true", help="Install a zsh hook so `agent` auto-patches")
+    parser.add_argument(
+        "--install",
+        action="store_true",
+        help="Install zsh hook + ~/.local/bin wrappers + LaunchAgent (auto-repatch after CLI updates)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Print per-file details")
     args = parser.parse_args()
 
@@ -605,6 +772,10 @@ def main() -> None:
                 print(f"input patch skipped ({root.name}): {exc}", file=sys.stderr)
                 continue
             raise
+
+    if not args.restore and (args.ensure or args.install):
+        # Only --ensure/--install own ~/.local/bin; plain apply_patch.py patches JS only.
+        ensure_persistence(dry_run=args.dry_run, verbose=args.verbose)
 
 
 if __name__ == "__main__":

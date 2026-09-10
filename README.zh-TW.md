@@ -130,8 +130,8 @@ python3 apply_patch.py --install   # 選用：zsh 掛鉤
 
 ```bash
 python3 apply_patch.py              # CLI + worker
-python3 apply_patch.py --install    # zsh 掛鉤
-python3 apply_patch.py --ensure     # 已完成則靜默；不匹配則警告後 exit 0
+python3 apply_patch.py --install    # zsh 掛鉤 + ~/.local/bin 包裝腳本 + LaunchAgent
+python3 apply_patch.py --ensure     # 已完成則靜默；修復包裝腳本；不匹配則警告後 exit 0
 python3 apply_patch.py --restore
 python3 apply_patch.py --list-backups
 python3 apply_patch.py --dry-run -v
@@ -143,7 +143,7 @@ python3 apply_patch.py --no-worker
 
 <br>
 
-更新後重新執行 `python3 apply_patch.py`。備份：`~/.local/share/cursor-cli-input-patch/backups/`（舊 `cursor-agent-cjk-input-patch` 首次執行自動遷移）。
+更新會替換版本目錄並把 `~/.local/bin/agent` 改回 symlink。**`--install`** 後 LaunchAgent 會再跑 `--ensure`（套用修補 + 還原包裝腳本）。啟動 `agent` 時 bin 包裝腳本也會呼叫 `--ensure`。備份：`~/.local/share/cursor-cli-input-patch/backups/`（舊路徑首次自動遷移）。
 
 不匹配時 **fail closed**。**`--ensure`** 警告後仍允許啟動 `agent`。最後手段：`curl https://cursor.com/install -fsS | bash`
 

@@ -514,6 +514,81 @@ def test_restore_rejects_dry_run_combo() -> None:
     assert "use --restore or --dry-run" in result.stderr + result.stdout
 
 
+def test_bin_wrapper_body_is_safe_shell() -> None:
+    from apply_patch import WRAPPER_MARKER, bin_wrapper_body, is_our_bin_wrapper
+
+    body = bin_wrapper_body(ROOT / "apply_patch.py")
+    assert body.startswith("#!/bin/sh\n")
+    assert WRAPPER_MARKER in body
+    assert "--ensure" in body
+    assert "cursor-agent/versions" in body.replace("\\", "/")
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        wrapper = tmp / "agent"
+        wrapper.write_text(body)
+        assert is_our_bin_wrapper(wrapper)
+        other = tmp / "symlink-agent"
+        other.symlink_to(wrapper)
+        assert not is_our_bin_wrapper(other)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_install_bin_wrappers_replaces_symlink() -> None:
+    import apply_patch as ap
+
+    tmp = Path(tempfile.mkdtemp())
+    bin_dir = tmp / "bin"
+    bin_dir.mkdir()
+    versions = tmp / "versions" / "2026.09.08-test"
+    versions.mkdir(parents=True)
+    fake = versions / "cursor-agent"
+    fake.write_text("#!/bin/sh\necho real\n")
+    fake.chmod(0o755)
+    stolen = bin_dir / "agent"
+    stolen.symlink_to(fake)
+    (bin_dir / "cursor-agent").symlink_to(fake)
+
+    prev_bin, prev_versions = ap.BIN_DIR, ap.DEFAULT_VERSIONS
+    ap.BIN_DIR = bin_dir
+    ap.DEFAULT_VERSIONS = versions.parent
+    try:
+        written = ap.install_bin_wrappers()
+        assert {p.name for p in written} == {"agent", "cursor-agent"}
+        assert ap.is_our_bin_wrapper(bin_dir / "agent")
+        assert not (bin_dir / "agent").is_symlink()
+        again = ap.install_bin_wrappers()
+        assert again == []
+    finally:
+        ap.BIN_DIR = prev_bin
+        ap.DEFAULT_VERSIONS = prev_versions
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_latest_version_skips_tmp_extract_dirs() -> None:
+    import apply_patch as ap
+
+    tmp = Path(tempfile.mkdtemp())
+    versions = tmp / "versions"
+    versions.mkdir()
+    old = versions / "2026.09.01-aaaaaaa"
+    new = versions / "2026.09.08-bbbbbbb"
+    staging = versions / ".tmp-2026.09.09-ccccccc"
+    for d in (old, new, staging):
+        d.mkdir()
+        (d / "cursor-agent").write_text("#!/bin/sh\n")
+    # Make staging newest so a naive mtime sort would pick it.
+    import os
+    import time
+
+    now = time.time()
+    os.utime(old, (now - 30, now - 30))
+    os.utime(new, (now - 10, now - 10))
+    os.utime(staging, (now, now))
+    assert ap.latest_version(versions) == new
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_repo_privacy() -> None:
     # Concatenate so this file does not embed full forbidden tokens as literals.
     forbidden = (
@@ -557,6 +632,9 @@ if __name__ == "__main__":
     test_apply_on_fixture_is_unique_and_valid_js()
     test_one_orig_backup_never_overwritten()
     test_restore_rejects_dry_run_combo()
+    test_bin_wrapper_body_is_safe_shell()
+    test_install_bin_wrappers_replaces_symlink()
+    test_latest_version_skips_tmp_extract_dirs()
     test_repo_privacy()
     print("ok")
     sys.exit(0)
