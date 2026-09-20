@@ -30,6 +30,7 @@ REINSTALL_HINT = "curl https://cursor.com/install -fsS | bash"
 # Unique original snippets from agent text-input bundles.
 # 2026.08.11-e8db854: `4794.index.js` (c=word, i=space).
 # 2026.08.31-4057e58: `658.index.js` (i=word, c=space — minifier rename only).
+# 2026.09.18-9a7762b: `5686.index.js` (s=word, i=space — minifier rename only).
 # If Cursor remintifies these, the patcher must fail closed rather than guess.
 WORD_OLD = (
     "function c(t){return/[A-Za-z0-9_]/.test(t)}function i(t){return/\\s/.test(t)}"
@@ -81,11 +82,37 @@ WORD_NEW_658 = (
     "if(\"\\n\"===t[n-1])return n;n--}const r=__wordStarts(t);let o=0;"
     "for(const s of r){if(!(s<e))break;o=s}return o}"
 )
+WORD_OLD_5686 = (
+    "function s(t){return/[A-Za-z0-9_]/.test(t)}function i(t){return/\\s/.test(t)}"
+    "function u(t,e){let n=e;const r=\"\\n\"===t[n]&&(0===n||\"\\n\"===t[n-1]);"
+    "if(n<t.length&&s(t[n]))for(;n<t.length&&s(t[n]);)n++;else r&&n++;"
+    "for(;n<t.length&&!s(t[n]);){if(\"\\n\"===t[n]&&(0===n||\"\\n\"===t[n-1]))return n;"
+    "if(\"\\n\"===t[n]&&n+1<t.length&&\"\\n\"===t[n+1])return n+1;n++}"
+    "return Math.min(t.length,Math.max(0,n))}function l(t,e){let n=e;if(n<=0)return 0;"
+    "for(n--;n>0&&!s(t[n]);){if(\"\\n\"===t[n]&&n>0&&\"\\n\"===t[n-1])return n;n--}"
+    "for(;n>0&&s(t[n-1]);)n--;return n}"
+)
+WORD_NEW_5686 = (
+    "function s(t){return/[A-Za-z0-9_]/.test(t)}function i(t){return/\\s/.test(t)}"
+    "const __wordSeg=new Intl.Segmenter(void 0,{granularity:\"word\"});"
+    "function __wordStarts(t){const e=[];for(const n of __wordSeg.segment(t))"
+    "n.isWordLike&&e.push(n.index);return e}"
+    "function u(t,e){let n=e;const r=\"\\n\"===t[n]&&(0===n||\"\\n\"===t[n-1]);"
+    "if(r){n++;const o=__wordStarts(t);for(const w of o)if(w>=n)return w;"
+    "return Math.min(t.length,Math.max(0,n))}const o=__wordStarts(t);"
+    "for(const w of o)if(w>e)return w;for(let r=e;r<t.length;r++){"
+    "if(\"\\n\"===t[r]&&(0===r||\"\\n\"===t[r-1]))return r;"
+    "if(\"\\n\"===t[r]&&r+1<t.length&&\"\\n\"===t[r+1])return r+1}return t.length}"
+    "function l(t,e){if(e<=0)return 0;let n=e-1;for(;n>0&&\"\\n\"===t[n];){"
+    "if(\"\\n\"===t[n-1])return n;n--}const r=__wordStarts(t);let o=0;"
+    "for(const w of r){if(!(w<e))break;o=w}return o}"
+)
 WORD_VARIANTS: tuple[tuple[str, str, str], ...] = (
     ("word helpers", WORD_OLD, WORD_NEW),
     ("word helpers", WORD_OLD_658, WORD_NEW_658),
+    ("word helpers", WORD_OLD_5686, WORD_NEW_5686),
 )
-PREFERRED_INPUT_BUNDLES = ("658.index.js", "4794.index.js")
+PREFERRED_INPUT_BUNDLES = ("5686.index.js", "658.index.js", "4794.index.js")
 
 LR_OLD = "if(n.leftArrow)v&&Nt--;else if(n.rightArrow)v&&Nt++;"
 LR_NEW = (
@@ -160,10 +187,34 @@ FIND_LINE_NEW = (
     "return{line:o,column:e>=s.endIndex?s.visualWidth:s.charToColumn[c]||0}}"
     "e<s.startIndex?r=o-1:n=o+1"
 )
-
-REPLACEMENTS: tuple[tuple[str, str, str, str], ...] = (
-    ("empty-line findLine", FIND_LINE_OLD, FIND_LINE_NEW, "e===s.endIndex&&(s.startIndex===s.endIndex"),
+# 2026.09.18: line object renamed s → c
+FIND_LINE_OLD_C = (
+    "if(e>=c.startIndex&&e<c.endIndex){const t=e-c.startIndex;"
+    "return{line:o,column:c.charToColumn[t]||0}}e<c.startIndex?r=o-1:n=o+1"
 )
+FIND_LINE_NEW_C = (
+    "if(e>=c.startIndex&&(e<c.endIndex||e===c.endIndex&&(c.startIndex===c.endIndex||"
+    "o+1>=t.lines.length||t.lines[o+1].startIndex>e))){const __i=e-c.startIndex;"
+    "return{line:o,column:e>=c.endIndex?c.visualWidth:c.charToColumn[__i]||0}}"
+    "e<c.startIndex?r=o-1:n=o+1"
+)
+
+FIND_LINE_VARIANTS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "empty-line findLine",
+        FIND_LINE_OLD,
+        FIND_LINE_NEW,
+        "e===s.endIndex&&(s.startIndex===s.endIndex",
+    ),
+    (
+        "empty-line findLine",
+        FIND_LINE_OLD_C,
+        FIND_LINE_NEW_C,
+        "e===c.endIndex&&(c.startIndex===c.endIndex",
+    ),
+)
+
+REPLACEMENTS: tuple[tuple[str, str, str, str], ...] = ()
 
 # Kept for tests / rollback of older installs. Not applied:
 # - grapheme Left/Right/Backspace (Hangul NFC already moves one syllable)
@@ -376,7 +427,22 @@ def replace_word_helpers(text: str) -> tuple[str, bool]:
 
 
 def word_needles() -> tuple[str, ...]:
-    return (WORD_OLD, WORD_OLD_658, "__wordSeg")
+    return (WORD_OLD, WORD_OLD_658, WORD_OLD_5686, "__wordSeg")
+
+
+def replace_find_line(text: str) -> tuple[str, bool]:
+    for label, old, new, already in FIND_LINE_VARIANTS:
+        count = text.count(old)
+        if count == 0:
+            if already in text:
+                return text, False
+            continue
+        if count != 1:
+            raise SystemExit(f"pattern not unique ({count}): {label}")
+        return replace_unique(text, old, new, label, already)
+    if any(already in text for _, _, _, already in FIND_LINE_VARIANTS):
+        return text, False
+    raise SystemExit("pattern not found: empty-line findLine")
 
 
 def patch_input_bundle(text: str) -> tuple[str, list[str]]:
@@ -384,6 +450,9 @@ def patch_input_bundle(text: str) -> tuple[str, list[str]]:
     text, ok = replace_word_helpers(text)
     if ok:
         applied.append("word helpers")
+    text, ok = replace_find_line(text)
+    if ok:
+        applied.append("empty-line findLine")
     for label, old, new, already in REPLACEMENTS:
         text, ok = replace_unique(text, old, new, label, already)
         if ok:

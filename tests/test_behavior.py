@@ -253,7 +253,13 @@ def test_patcher_has_no_ime_cursor_hack() -> None:
     assert "upFromBottom" not in text
     assert "[Symbol.iterator]().next()" in LR_NEW
     assert all(old in text for old, _new in ((u[1], u[2]) for u in ITERATOR_UPGRADES))
-    assert [label for label, *_ in REPLACEMENTS] == ["empty-line findLine"]
+    from apply_patch import FIND_LINE_VARIANTS
+
+    assert [label for label, *_ in FIND_LINE_VARIANTS] == [
+        "empty-line findLine",
+        "empty-line findLine",
+    ]
+    assert REPLACEMENTS == ()
 
 
 def test_empty_line_findline_maps_blank_not_url() -> None:
@@ -458,11 +464,14 @@ def test_apply_does_not_touch_arrows_or_width() -> None:
 
 
 def test_apply_on_fixture_is_unique_and_valid_js() -> None:
-    for old in (WORD_OLD, WORD_OLD_658):
-        pieces = ["exports.id=658;exports.modules={};", old]
-        for _label, repl_old, _new, _already in REPLACEMENTS:
-            pieces.append(repl_old)
-        fixture = "".join(pieces)
+    from apply_patch import FIND_LINE_VARIANTS, WORD_OLD_5686
+
+    for old, find_old in (
+        (WORD_OLD, FIND_LINE_VARIANTS[0][1]),
+        (WORD_OLD_658, FIND_LINE_VARIANTS[0][1]),
+        (WORD_OLD_5686, FIND_LINE_VARIANTS[1][1]),
+    ):
+        fixture = "exports.id=658;exports.modules={};" + old + find_old
         updated, applied = patch_input_bundle(fixture)
         assert applied == ["word helpers", "empty-line findLine"], applied
         for marker in FORBIDDEN_MARKERS:
