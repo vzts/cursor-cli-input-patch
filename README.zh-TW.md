@@ -87,9 +87,9 @@ python3 apply_patch.py --install   # 選用：zsh 掛鉤
 
 <br>
 
-- **Python 3**、**Node.js**、**macOS**（IDE worker 路徑）
+- **Python 3**、**macOS**（IDE worker 路徑）。語法檢查使用 CLI 版本目錄裡的 `node`，PATH 上的 `node` 只是備援。檢查通過後才替換 bundle。
 - 已安裝 **Cursor CLI**：`curl https://cursor.com/install -fsS | bash`
-- **`--install`** — **僅 zsh**（寫入 `~/.zshrc`）。bash/fish 請手動執行
+- **`--install`** — 寫入 `~/.zshrc` 掛鉤、`~/.local/bin` 包裝腳本，以及（macOS）在 CLI 更新後重新執行 `--ensure` 的 LaunchAgent。bash/fish 仍可使用包裝腳本和 LaunchAgent；zsh 掛鉤是選擇性的。
 
 </details>
 
@@ -97,7 +97,7 @@ python3 apply_patch.py --install   # 選用：zsh 掛鉤
 
 ## 修補內容
 
-僅 **`4794.index.js`**。
+只修改目前安裝裡的文字輸入 bundle。帶雜湊的檔名會隨 CLI 版本改變（舊版曾是 `4794.index.js`、`658.index.js`、`5686.index.js`）。依內容尋找。
 
 | | |
 |:--|:--|
@@ -158,12 +158,12 @@ flowchart LR
   A[啟動 agent] --> B{zsh 掛鉤?}
   B -->|是| C[apply_patch.py --ensure]
   B -->|否| D[手動]
-  C --> E[4794.index.js]
+  C --> E[尋找文字輸入 bundle]
   D --> E
   E --> F[替換 snippet]
   F --> G{node --check}
-  G -->|通過| H[寫入 + 備份]
-  G -->|失敗| I[回滾]
+  G -->|通過| H[替換 bundle]
+  G -->|失敗| I[保留目前檔案]
 ```
 
 <br>

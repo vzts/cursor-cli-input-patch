@@ -91,7 +91,7 @@ Restart **`agent`** (or **`cursor-agent`** if you still use that alias) after pa
 <br>
 
 - **Python 3** — runs the patcher
-- **Node.js** — `node --check` before writing
+- **Node** — `node --check` uses the `node` binary shipped in the CLI version directory. A `node` on `PATH` is only a fallback. The live bundle is replaced only after the check passes.
 - **macOS** — install paths (especially the IDE worker copy) match Cursor’s layout today
 - **Cursor CLI** — already installed: `curl https://cursor.com/install -fsS | bash`
 - **`--install`** — writes `~/.zshrc` hook, durable `~/.local/bin` wrappers, and (macOS) a LaunchAgent that re-runs `--ensure` after CLI updates. Bash/fish: wrappers + LaunchAgent still work; zsh hook is optional.
@@ -102,7 +102,7 @@ Restart **`agent`** (or **`cursor-agent`** if you still use that alias) after pa
 
 ## What it patches
 
-Only **`4794.index.js`** — the text-input bundle in your existing install.
+The text-input bundle in your existing install. The hashed filename changes across CLI releases (older builds used `4794.index.js`, `658.index.js`, `5686.index.js`). The patcher finds it by content.
 
 | | |
 |:--|:--|
@@ -181,8 +181,8 @@ flowchart LR
   C --> E[find text-input bundle]
   E --> F[replace pinned snippets]
   F --> G{node --check}
-  G -->|ok| H[write + backup]
-  G -->|fail| I[rollback]
+  G -->|ok| H[replace bundle]
+  G -->|fail| I[keep current file]
 ```
 
 Patterns are pinned to a specific minified shape — the patcher refuses to guess if Cursor re-minifies differently.

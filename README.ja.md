@@ -87,9 +87,9 @@ python3 apply_patch.py --install   # 任意: zsh フック
 
 <br>
 
-- **Python 3**、**Node.js**、**macOS**（IDE worker パス）
+- **Python 3**、**macOS**（IDE worker パス）。構文チェックは CLI バージョンディレクトリの `node` を使い、PATH の `node` は代替です。チェック通過後にだけバンドルを置き換えます。
 - **Cursor CLI** インストール済み: `curl https://cursor.com/install -fsS | bash`
-- **`--install`** — **zsh のみ**（`~/.zshrc`）。bash/fish は手動実行
+- **`--install`** — `~/.zshrc` フック、`~/.local/bin` ラッパー、(macOS) CLI 更新後に `--ensure` を再実行する LaunchAgent。bash/fish もラッパーと LaunchAgent は動く。zsh フックは任意。
 
 </details>
 
@@ -97,7 +97,7 @@ python3 apply_patch.py --install   # 任意: zsh フック
 
 ## パッチ対象
 
-**`4794.index.js`** のみ。
+最新インストールのテキスト入力バンドルだけを変更します。ハッシュ付きファイル名は CLI のリリースごとに変わります（以前は `4794.index.js`、`658.index.js`、`5686.index.js`）。中身で探します。
 
 | | |
 |:--|:--|
@@ -158,12 +158,12 @@ flowchart LR
   A[agent 起動] --> B{zsh フック?}
   B -->|yes| C[apply_patch.py --ensure]
   B -->|no| D[手動]
-  C --> E[4794.index.js]
+  C --> E[テキスト入力バンドルを探索]
   D --> E
   E --> F[snippet 置換]
   F --> G{node --check}
-  G -->|ok| H[書込 + バックアップ]
-  G -->|fail| I[ロールバック]
+  G -->|ok| H[バンドル置換]
+  G -->|fail| I[現ファイルを維持]
 ```
 
 <br>

@@ -475,13 +475,29 @@ def patch_input_bundle(text: str) -> tuple[str, list[str]]:
     return text, applied
 
 
-def find_input_bundle(root: Path, *, restoring: bool = False) -> Path:
-    if restoring:
-        for name in PREFERRED_INPUT_BUNDLES:
-            preferred = root / name
-            if preferred.exists():
-                return preferred
+def bundle_from_backup(root: Path) -> Path | None:
+    """Recover a hashed bundle name from its pristine backup.
 
+    Chunk filenames change every CLI release, so a corrupted file may no longer
+    contain the search needles and is not in the old preferred-name list.
+    """
+    version = root.name
+    prefix = f"{install_kind(root)}-{version}-"
+    suffix = ".orig.bak"
+    names: set[str] = set()
+    for base in backup_roots():
+        if not base.exists():
+            continue
+        for bak in base.glob(prefix + "*" + suffix):
+            fname = bak.name[len(prefix) : -len(suffix)]
+            if fname.endswith(".index.js"):
+                names.add(fname)
+    if len(names) != 1:
+        return None
+    return root / next(iter(names))
+
+
+def find_input_bundle(root: Path, *, restoring: bool = False) -> Path:
     needles = word_needles()
     for name in PREFERRED_INPUT_BUNDLES:
         preferred = root / name
@@ -499,22 +515,64 @@ def find_input_bundle(root: Path, *, restoring: bool = False) -> Path:
             matches.append(path)
     if len(matches) == 1:
         return matches[0]
+    if not matches and restoring:
+        recovered = bundle_from_backup(root)
+        if recovered is not None:
+            return recovered
     if not matches:
         raise SystemExit(f"No text-input bundle with expected word helpers under {root}")
     names = ", ".join(p.name for p in matches)
     raise SystemExit(f"Multiple candidate input bundles: {names}")
 
 
-def node_check(path: Path) -> None:
-    result = subprocess.run(
-        ["node", "--check", str(path)],
-        capture_output=True,
-        text=True,
+def node_binary(anchor: Path) -> str:
+    """Prefer the node binary shipped in a Cursor CLI version directory.
+
+    Interactive shells often have no `node` on PATH. Pass the version directory
+    or a file inside it. PATH is only a fallback (backups live outside that tree).
+    """
+    directory = anchor if anchor.is_dir() else anchor.parent
+    bundled = directory / "node"
+    if bundled.is_file() and os.access(bundled, os.X_OK):
+        return str(bundled)
+    found = shutil.which("node")
+    if found:
+        return found
+    raise SystemExit(
+        f"node not found in {directory} or on PATH; "
+        "cannot syntax-check the patched bundle"
     )
+
+
+def node_check(path: Path, *, search: Path | None = None) -> None:
+    node = node_binary(search or path)
+    try:
+        result = subprocess.run(
+            [node, "--check", str(path)],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise SystemExit(f"node --check failed to start ({node}): {exc}") from exc
     if result.returncode != 0:
         raise SystemExit(
             f"node --check failed for {path.name}:\n{result.stderr or result.stdout}"
         )
+
+
+def write_checked(path: Path, updated: str) -> None:
+    """Replace path only after node --check accepts the new text.
+
+    A failed check must leave the live bundle untouched. Rolling back to the
+    pristine .orig.bak would also drop an older good patch.
+    """
+    tmp = path.with_name(f".{path.name}.patch-tmp")
+    try:
+        tmp.write_text(updated)
+        node_check(tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def warn_old_ime(root: Path) -> None:
@@ -546,22 +604,16 @@ def patch_tree(root: Path, dry_run: bool = False, verbose: bool = False) -> bool
             print(f"  {path.name}: already up to date")
         return False
     kind = install_kind(root)
+    if dry_run:
+        print(f"would patch {kind} {root.name}")
+        if verbose:
+            print(f"  {path.name}: {', '.join(applied)}")
+        return True
+    ensure_original_backup(path, original)
+    write_checked(path, updated)
     print(f"patched {kind} {root.name}")
     if verbose:
         print(f"  {path.name}: {', '.join(applied)}")
-    if dry_run:
-        return True
-    bak = ensure_original_backup(path, original)
-    path.write_text(updated)
-    try:
-        node_check(path)
-    except SystemExit:
-        if bak and bak.exists():
-            shutil.copy2(bak, path)
-        else:
-            path.write_text(original)
-        print(f"  rolled back {path.name}", file=sys.stderr)
-        raise
     return True
 
 
@@ -574,8 +626,8 @@ def restore_tree(root: Path) -> None:
             f"No original backup for {path.name} under {BACKUP_DIR}\n"
             f"Reinstall the official CLI instead:\n  {REINSTALL_HINT}"
         )
+    node_check(bak, search=root)
     shutil.copy2(bak, path)
-    node_check(path)
     print(f"  restored {path.name} from {bak.name}")
     warn_old_ime(root)
 
@@ -836,7 +888,7 @@ def main() -> None:
             continue
         try:
             patch_tree(root, dry_run=args.dry_run, verbose=args.verbose)
-        except SystemExit as exc:
+        except (SystemExit, OSError) as exc:
             if args.ensure:
                 print(f"input patch skipped ({root.name}): {exc}", file=sys.stderr)
                 continue

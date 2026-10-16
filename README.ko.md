@@ -88,7 +88,7 @@ python3 apply_patch.py --install   # 선택: zsh 훅 (아래 참고)
 
 <br>
 
-- **Python 3**, **Node.js**, **macOS** (IDE worker 경로 기준)
+- **Python 3**, **macOS** (IDE worker 경로 기준). 구문 검사는 CLI 버전 디렉터리의 `node`를 쓰고, PATH의 `node`는 없을 때의 대체입니다. 검사를 통과한 뒤에만 번들을 교체합니다.
 - **Cursor CLI** 설치: `curl https://cursor.com/install -fsS | bash`
 - **`--install`** — `~/.zshrc` 훅, `~/.local/bin` 래퍼, (macOS) CLI 업데이트 후 `--ensure`를 다시 도는 LaunchAgent. bash/fish도 래퍼·LaunchAgent는 동작; zsh 훅은 선택.
 
@@ -98,7 +98,7 @@ python3 apply_patch.py --install   # 선택: zsh 훅 (아래 참고)
 
 ## 패치 대상
 
-**`4794.index.js`** (텍스트 입력 번들)만 수정.
+최신 설치의 텍스트 입력 번들만 수정합니다. 파일명의 해시는 CLI 버전마다 바뀝니다(예전 빌드는 `4794.index.js`, `658.index.js`, `5686.index.js`). 내용으로 찾습니다.
 
 | | |
 |:--|:--|
@@ -175,12 +175,12 @@ flowchart LR
   A[agent 실행] --> B{zsh 훅?}
   B -->|yes| C[apply_patch.py --ensure]
   B -->|no| D[수동 실행]
-  C --> E[4794.index.js 탐색]
+  C --> E[텍스트 입력 번들 탐색]
   D --> E
   E --> F[snippet 교체]
   F --> G{node --check}
-  G -->|ok| H[쓰기 + 백업]
-  G -->|fail| I[롤백]
+  G -->|ok| H[번들 교체]
+  G -->|fail| I[기존 파일 유지]
 ```
 
 패턴은 특정 minify 형태에 고정 — Cursor가 바꾸면 추측하지 않습니다.

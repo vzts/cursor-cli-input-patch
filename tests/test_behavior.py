@@ -598,6 +598,68 @@ def test_latest_version_skips_tmp_extract_dirs() -> None:
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_restore_finds_hashed_bundle_from_backup_name() -> None:
+    import apply_patch as ap
+
+    tmp = Path(tempfile.mkdtemp())
+    version = tmp / "2026.10.14-deadbee"
+    version.mkdir()
+    bundle = version / "1820.index.js"
+    bundle.write_text("corrupted")
+    backup_dir = tmp / "backups"
+    backup_dir.mkdir()
+    (backup_dir / "cli-2026.10.14-deadbee-1820.index.js.orig.bak").write_text("vanilla")
+    previous = ap.BACKUP_DIR
+    ap.BACKUP_DIR = backup_dir
+    try:
+        assert ap.find_input_bundle(version, restoring=True) == bundle
+    finally:
+        ap.BACKUP_DIR = previous
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_node_binary_prefers_version_directory() -> None:
+    import apply_patch as ap
+
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        bundled = tmp / "node"
+        bundled.write_text("#!/bin/sh\nexit 0\n")
+        bundled.chmod(0o755)
+        bundle = tmp / "1820.index.js"
+        bundle.write_text("live")
+        assert ap.node_binary(bundle) == str(bundled)
+        assert ap.node_binary(tmp) == str(bundled)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_write_checked_keeps_live_file_when_check_fails() -> None:
+    import apply_patch as ap
+
+    tmp = Path(tempfile.mkdtemp())
+    target = tmp / "1820.index.js"
+    target.write_text("live")
+    previous = ap.node_check
+
+    def fail(path: Path, *, search: Path | None = None) -> None:
+        raise SystemExit("bad syntax")
+
+    ap.node_check = fail
+    try:
+        try:
+            ap.write_checked(target, "broken")
+        except SystemExit as exc:
+            assert "bad syntax" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+        assert target.read_text() == "live"
+        assert [p.name for p in tmp.iterdir()] == ["1820.index.js"]
+    finally:
+        ap.node_check = previous
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_repo_privacy() -> None:
     # Concatenate so this file does not embed full forbidden tokens as literals.
     forbidden = (
@@ -644,6 +706,9 @@ if __name__ == "__main__":
     test_bin_wrapper_body_is_safe_shell()
     test_install_bin_wrappers_replaces_symlink()
     test_latest_version_skips_tmp_extract_dirs()
+    test_restore_finds_hashed_bundle_from_backup_name()
+    test_node_binary_prefers_version_directory()
+    test_write_checked_keeps_live_file_when_check_fails()
     test_repo_privacy()
     print("ok")
     sys.exit(0)
