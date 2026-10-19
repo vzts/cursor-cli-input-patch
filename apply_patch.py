@@ -566,7 +566,10 @@ def write_checked(path: Path, updated: str) -> None:
     A failed check must leave the live bundle untouched. Rolling back to the
     pristine .orig.bak would also drop an older good patch.
     """
-    tmp = path.with_name(f".{path.name}.patch-tmp")
+    # Node's ESM loader keys off the final extension. `.patch-tmp` makes
+    # `node --check` throw ERR_UNKNOWN_FILE_EXTENSION (Node 26+), so the
+    # syntax check never runs and the live bundle is left unpatched.
+    tmp = path.with_name(f".{path.name}.patch-tmp.js")
     try:
         tmp.write_text(updated)
         node_check(tmp)

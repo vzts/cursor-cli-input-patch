@@ -634,6 +634,35 @@ def test_node_binary_prefers_version_directory() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_write_checked_temp_keeps_js_extension() -> None:
+    """node --check rejects unknown extensions such as .patch-tmp."""
+    import apply_patch as ap
+
+    node = shutil.which("node")
+    if not node:
+        return
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        target = tmp / "1820.index.js"
+        target.write_text("var live = 1;\n")
+        bad = tmp / ".1820.index.js.patch-tmp"
+        good = tmp / ".1820.index.js.patch-tmp.js"
+        bad.write_text("var ok = 1;\n")
+        good.write_text("var ok = 1;\n")
+        bad_check = subprocess.run([node, "--check", str(bad)], capture_output=True, text=True)
+        good_check = subprocess.run([node, "--check", str(good)], capture_output=True, text=True)
+        bad.unlink()
+        good.unlink()
+        if bad_check.returncode != 0:
+            assert "ERR_UNKNOWN_FILE_EXTENSION" in (bad_check.stderr or "")
+            assert good_check.returncode == 0, good_check.stderr
+        ap.write_checked(target, "var replaced = 1;\n")
+        assert target.read_text() == "var replaced = 1;\n"
+        assert [p.name for p in tmp.iterdir()] == ["1820.index.js"]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_write_checked_keeps_live_file_when_check_fails() -> None:
     import apply_patch as ap
 
@@ -708,6 +737,7 @@ if __name__ == "__main__":
     test_latest_version_skips_tmp_extract_dirs()
     test_restore_finds_hashed_bundle_from_backup_name()
     test_node_binary_prefers_version_directory()
+    test_write_checked_temp_keeps_js_extension()
     test_write_checked_keeps_live_file_when_check_fails()
     test_repo_privacy()
     print("ok")
